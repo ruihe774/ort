@@ -487,6 +487,62 @@ impl SessionBuilder {
 		})
 	}
 
+	/// Load an ONNX graph from owned memory and commit the session.
+	pub fn with_model_from_owned_memory(self, model_vec: Vec<u8>) -> OrtResult<OwnedInMemorySession> {
+		let mut session_ptr: *mut sys::OrtSession = std::ptr::null_mut();
+
+		let env_ptr: *const sys::OrtEnv = self.env.ptr();
+
+		apply_execution_providers(
+			self.session_options_ptr,
+			self.execution_providers
+				.iter()
+				.chain(&self.env.execution_providers)
+				.cloned()
+				.collect::<Vec<_>>()
+		);
+
+		let str_to_char = |s: &str| {
+			s.as_bytes()
+				.iter()
+				.chain(std::iter::once(&b'\0')) // Make sure we have a null terminated string
+				.map(|b| *b as std::os::raw::c_char)
+				.collect::<Vec<std::os::raw::c_char>>()
+		};
+		// Enable zero-copy deserialization for models in `.ort` format.
+		ortsys![unsafe AddSessionConfigEntry(self.session_options_ptr, str_to_char("session.use_ort_model_bytes_directly").as_ptr(), str_to_char("1").as_ptr())];
+		ortsys![unsafe AddSessionConfigEntry(self.session_options_ptr, str_to_char("session.use_ort_model_bytes_for_initializers").as_ptr(), str_to_char("1").as_ptr())];
+
+		let model_data = model_vec.as_ptr() as *const std::ffi::c_void;
+		let model_data_length = model_vec.len();
+		ortsys![
+			unsafe CreateSessionFromArray(env_ptr, model_data, model_data_length as _, self.session_options_ptr, &mut session_ptr) -> OrtError::CreateSession;
+			nonNull(session_ptr)
+		];
+
+		let mut allocator_ptr: *mut sys::OrtAllocator = std::ptr::null_mut();
+		ortsys![unsafe GetAllocatorWithDefaultOptions(&mut allocator_ptr) -> OrtError::CreateAllocator; nonNull(allocator_ptr)];
+
+		// Extract input and output properties
+		let num_input_nodes = dangerous::extract_inputs_count(session_ptr)?;
+		let num_output_nodes = dangerous::extract_outputs_count(session_ptr)?;
+		let inputs = (0..num_input_nodes)
+			.map(|i| dangerous::extract_input(session_ptr, allocator_ptr, i))
+			.collect::<OrtResult<Vec<Input>>>()?;
+		let outputs = (0..num_output_nodes)
+			.map(|i| dangerous::extract_output(session_ptr, allocator_ptr, i))
+			.collect::<OrtResult<Vec<Output>>>()?;
+
+		let session = Session {
+			env: Arc::clone(&self.env),
+			session_ptr: Arc::new(SessionPointerHolder { inner: session_ptr }),
+			allocator_ptr,
+			inputs,
+			outputs
+		};
+		Ok(OwnedInMemorySession { session, model_vec })
+	}
+
 	/// Load an ONNX graph from memory and commit the session.
 	pub fn with_model_from_memory(self, model_bytes: &[u8]) -> OrtResult<InMemorySession<'_>> {
 		let mut session_ptr: *mut sys::OrtSession = std::ptr::null_mut();
@@ -579,6 +635,21 @@ pub struct InMemorySession<'s> {
 }
 
 impl<'s> Deref for InMemorySession<'s> {
+	type Target = Session;
+	fn deref(&self) -> &Self::Target {
+		&self.session
+	}
+}
+
+/// A [`Session`] owns data stored in-memory
+#[derive(Debug)]
+pub struct OwnedInMemorySession {
+	session: Session,
+	#[allow(dead_code)]
+	model_vec: Vec<u8>
+}
+
+impl Deref for OwnedInMemorySession {
 	type Target = Session;
 	fn deref(&self) -> &Self::Target {
 		&self.session

@@ -27,7 +27,7 @@ pub use self::error::{OrtApiError, OrtError, OrtResult};
 pub use self::execution_providers::ExecutionProvider;
 pub use self::io_binding::IoBinding;
 pub use self::memory::{AllocationDevice, MemoryInfo};
-pub use self::session::{InMemorySession, Session, SessionBuilder};
+pub use self::session::{InMemorySession, OwnedInMemorySession, Session, SessionBuilder};
 pub use self::tensor::NdArrayExtensions;
 pub use self::value::Value;
 
