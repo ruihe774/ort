@@ -36,7 +36,7 @@ copy-dylibs = []
 
 minimal-build = []
 experimental = []
-mimalloc = []
+mimalloc = [ "libmimalloc-sys" ]
 compile-static = []
 
 cuda = []
@@ -61,7 +61,7 @@ qnn = []
 ndarray = "0.15"
 thiserror = "1.0"
 libloading = { version = "0.7", optional = true }
-
+libmimalloc-sys = { version = "0.1", optional = true, features = [ "override" ] }
 ureq = { version = "2.1", optional = true, default-features = false, features = [ "tls" ] }
 lazy_static = "1.4"
 tracing = "0.1"
